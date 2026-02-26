@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Message;
 use App\Events\MessageSent;
+use App\Models\Notification;
+use App\Events\NotificationSent;
 
 class MessageController extends Controller
 {
@@ -26,6 +28,14 @@ class MessageController extends Controller
 
         // 🔴 Emite por WebSocket a los demás
         broadcast(new MessageSent($mensaje))->toOthers();
+
+        // crear notificación para el resto de la aplicación
+        $notification = Notification::create([
+            'type' => 'mensaje',
+            'message' => "Nuevo mensaje de {$mensaje->user_name}",
+            'url' => '/chat',
+        ]);
+        broadcast(new NotificationSent($notification));
 
         return response()->json($mensaje);
     }
