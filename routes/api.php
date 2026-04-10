@@ -41,6 +41,8 @@ Route::get('/email/verify/{id}/{hash}', function (Request $request, $id, $hash) 
 
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/logout-all', [AuthController::class, 'logoutAll']);
+    Route::post('/change-password', [AuthController::class, 'changePassword']);
     Route::get('/user', [AuthController::class, 'user']);
 
     Route::middleware('verified')->group(function () {
