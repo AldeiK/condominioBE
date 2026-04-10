@@ -2,11 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\PasswordResetCodeMail;
+use App\Models\PasswordResetCode;
 use App\Models\User;
-use Illuminate\Http\Request;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 
 class AuthController extends Controller
 {
@@ -74,8 +78,6 @@ class AuthController extends Controller
                 ], 403);
             }
 
-            // Un token por dispositivo:
-            // si vuelve a entrar desde el mismo dispositivo, reemplaza ese token
             $user->tokens()
                 ->where('name', $validated['device_name'])
                 ->delete();
@@ -163,7 +165,6 @@ class AuthController extends Controller
             $user->password = $data['password'];
             $user->save();
 
-            // Cierra sesión en todos los dispositivos
             $user->tokens()->delete();
 
             return response()->json([
@@ -216,5 +217,108 @@ class AuthController extends Controller
         return response()->json([
             'message' => 'Correo de verificación reenviado.',
         ]);
+    }
+
+    public function sendPasswordResetCode(Request $request)
+    {
+        try {
+            $data = $request->validate([
+                'email' => ['required', 'email'],
+            ]);
+
+            $user = User::where('email', $data['email'])->first();
+
+            if (!$user) {
+                return response()->json([
+                    'message' => 'No existe un usuario con ese correo.',
+                ], 404);
+            }
+
+            PasswordResetCode::where('email', $data['email'])
+                ->whereNull('used_at')
+                ->delete();
+
+            $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+            PasswordResetCode::create([
+                'email' => $data['email'],
+                'code' => $code,
+                'expires_at' => now()->addMinutes(10),
+                'used_at' => null,
+            ]);
+
+            Mail::to($data['email'])->send(new PasswordResetCodeMail($data['email'], $code));
+
+            return response()->json([
+                'message' => 'Se envió un código de recuperación al correo.',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al enviar el código: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function resetPasswordWithCode(Request $request)
+    {
+        try {
+            $data = $request->validate([
+                'email' => ['required', 'email'],
+                'code' => ['required', 'digits:6'],
+                'password' => ['required', 'string', 'min:6', 'confirmed'],
+            ]);
+
+            $user = User::where('email', $data['email'])->first();
+
+            if (!$user) {
+                return response()->json([
+                    'message' => 'Usuario no encontrado.',
+                ], 404);
+            }
+
+            $reset = PasswordResetCode::where('email', $data['email'])
+                ->where('code', $data['code'])
+                ->whereNull('used_at')
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if (!$reset) {
+                return response()->json([
+                    'message' => 'El código es inválido.',
+                ], 422);
+            }
+
+            if (!$reset->expires_at || now()->greaterThan($reset->expires_at)) {
+                return response()->json([
+                    'message' => 'El código ha expirado.',
+                ], 422);
+            }
+
+            $user->password = $data['password'];
+            $user->save();
+
+            $reset->used_at = now();
+            $reset->save();
+
+            $user->tokens()->delete();
+
+            return response()->json([
+                'message' => 'Contraseña restablecida correctamente. Se cerró la sesión en todos los dispositivos.',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al restablecer la contraseña: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

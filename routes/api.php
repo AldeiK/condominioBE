@@ -14,6 +14,10 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/email/verification-notification', [AuthController::class, 'resendVerificationEmail']);
 
+// Recuperación por código
+Route::post('/forgot-password/code', [AuthController::class, 'sendPasswordResetCode']);
+Route::post('/reset-password/code', [AuthController::class, 'resetPasswordWithCode']);
+
 Route::get('/email/verify/{id}/{hash}', function (Request $request, $id, $hash) {
     $frontend = env('FRONTEND_URL', 'http://localhost:5173');
 
