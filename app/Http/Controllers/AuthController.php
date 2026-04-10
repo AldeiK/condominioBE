@@ -2,80 +2,144 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
-    // crear cuenta (puede ser usada por administrador desde el frontend)
     public function register(Request $request)
     {
         try {
             $data = $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
-                'password' => 'required|string|min:6|confirmed',
+                'name' => ['required', 'string', 'max:255'],
+                'email' => ['required', 'email', 'unique:users,email'],
+                'password' => ['required', 'string', 'min:6', 'confirmed'],
             ]);
 
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
-                'password' => $data['password'], // El modelo lo hashea automáticamente
+                'password' => $data['password'],
+                'role' => 'resident',
             ]);
 
-            return response()->json(['user' => $user, 'message' => 'Usuario creado exitosamente'], 201);
+            event(new Registered($user));
+
+            return response()->json([
+                'message' => 'Usuario creado. Revisa tu correo para verificar tu cuenta.',
+                'user' => $user,
+                'requires_verification' => true,
+            ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Error al crear usuario: ' . $e->getMessage()], 500);
+            return response()->json([
+                'message' => 'Error al crear usuario: '.$e->getMessage(),
+            ], 500);
         }
     }
 
-    // inicio de sesión y creación de token
     public function login(Request $request)
     {
         try {
             $validated = $request->validate([
-                'email' => 'required|email',
-                'password' => 'required|string',
+                'email' => ['required', 'email'],
+                'password' => ['required', 'string'],
             ]);
 
             if (!Auth::attempt($validated)) {
-                return response()->json(['message' => 'Credenciales inválidas'], 401);
+                return response()->json([
+                    'message' => 'Credenciales inválidas',
+                ], 401);
             }
 
+            /** @var User $user */
             $user = Auth::user();
-            $token = $user->createToken('api-token')->plainTextToken;
-            
+
+            if (!$user->hasVerifiedEmail()) {
+                return response()->json([
+                    'message' => 'Debes verificar tu correo antes de iniciar sesión.',
+                    'requires_verification' => true,
+                    'email' => $user->email,
+                ], 403);
+            }
+
+            $token = $user->createToken('api-token');
+
             return response()->json([
-                'user' => $user, 
-                'token' => $token,
-                'message' => 'Sesión iniciada correctamente'
+                'user' => $user,
+                'token' => $token->plainTextToken,
+                'role' => $user->role ?? 'resident',
+                'message' => 'Sesión iniciada correctamente',
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Error al iniciar sesión: ' . $e->getMessage()], 500);
+            return response()->json([
+                'message' => 'Error al iniciar sesión: '.$e->getMessage(),
+            ], 500);
         }
     }
 
-    // cerrar sesión (revocar token actual)
     public function logout(Request $request)
     {
         try {
-            if ($request->user()) {
+            if ($request->user() && $request->user()->currentAccessToken()) {
                 $request->user()->currentAccessToken()->delete();
             }
-            return response()->json(['message' => 'Sesión cerrada']);
+
+            return response()->json([
+                'message' => 'Sesión cerrada',
+            ]);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Error al cerrar sesión: ' . $e->getMessage()], 500);
+            return response()->json([
+                'message' => 'Error al cerrar sesión: '.$e->getMessage(),
+            ], 500);
         }
     }
 
-    // datos del usuario autenticado
     public function user(Request $request)
     {
-        return response()->json($request->user());
+        $user = $request->user();
+
+        return response()->json([
+            ...$user->toArray(),
+            'role' => $user->role ?? 'resident',
+        ]);
+    }
+
+    public function resendVerificationEmail(Request $request)
+    {
+        $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return response()->json([
+                'message' => 'Usuario no encontrado.',
+            ], 404);
+        }
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'El correo ya fue verificado.',
+            ], 200);
+        }
+
+        $user->sendEmailVerificationNotification();
+
+        return response()->json([
+            'message' => 'Correo de verificación reenviado.',
+        ]);
     }
 }
