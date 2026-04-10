@@ -10,6 +10,13 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\NotificationController;
 
+Route::get('/ping', function () {
+    return response()->json([
+        'ok' => true,
+        'message' => 'API funcionando correctamente',
+    ]);
+});
+
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/email/verification-notification', [AuthController::class, 'resendVerificationEmail']);
